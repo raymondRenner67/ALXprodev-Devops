@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# Batch Processing Script - Task 2
+# Batch Processing Script - Task 2 (Enhanced with Retry Logic)
 # Loops through a list of Pokémon and retrieves data from the API
 # Saves each Pokémon to a separate JSON file
 # Implements rate limiting with delays between requests
+# Implements retry logic for failed requests (up to 3 attempts)
 
 # List of Pokémon to fetch
 POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
@@ -17,6 +18,9 @@ ERROR_FILE="batch_errors.txt"
 # Delay between requests (in seconds) to handle rate limiting
 DELAY=1
 
+# Maximum number of retry attempts
+MAX_RETRIES=3
+
 # Clear error log
 > "${ERROR_FILE}"
 
@@ -28,40 +32,69 @@ echo ""
 SUCCESS_COUNT=0
 FAIL_COUNT=0
 
+# Function to fetch Pokémon data with retry logic
+fetch_pokemon() {
+    local pokemon=$1
+    local output_file="${pokemon}.json"
+    local api_url="${API_BASE_URL}/${pokemon}"
+    local attempt=1
+    
+    while [ ${attempt} -le ${MAX_RETRIES} ]; do
+        # Make API request with error handling
+        HTTP_CODE=$(curl -s -S -w "%{http_code}" -o "${output_file}" "${api_url}" 2>/dev/null)
+        CURL_EXIT=$?
+        
+        # Check if curl command was successful and HTTP code is 200
+        if [ ${CURL_EXIT} -eq 0 ] && [ "${HTTP_CODE}" -eq 200 ]; then
+            return 0  # Success
+        fi
+        
+        # Log the attempt
+        if [ ${CURL_EXIT} -ne 0 ]; then
+            echo "  Attempt ${attempt}/${MAX_RETRIES}: Network error" >&2
+        elif [ "${HTTP_CODE}" -eq 404 ]; then
+            echo "  Attempt ${attempt}/${MAX_RETRIES}: Pokémon not found (HTTP 404)" >&2
+            # Don't retry for 404 errors (invalid Pokémon name)
+            rm -f "${output_file}"
+            return 2  # Invalid Pokémon
+        else
+            echo "  Attempt ${attempt}/${MAX_RETRIES}: HTTP ${HTTP_CODE}" >&2
+        fi
+        
+        # Clean up failed download
+        rm -f "${output_file}"
+        
+        # If not the last attempt, wait before retrying
+        if [ ${attempt} -lt ${MAX_RETRIES} ]; then
+            sleep 2  # Wait 2 seconds before retry
+        fi
+        
+        ((attempt++))
+    done
+    
+    return 1  # All retries failed
+}
+
 # Loop through each Pokémon in the list
 for pokemon in "${POKEMON_LIST[@]}"; do
     OUTPUT_FILE="${pokemon}.json"
-    API_URL="${API_BASE_URL}/${pokemon}"
     
     echo "Fetching data for ${pokemon}..."
     
-    # Make API request with error handling
-    # -s: silent mode
-    # -S: show errors even in silent mode
-    # -w "%{http_code}": write HTTP status code
-    # -o: output file
-    HTTP_CODE=$(curl -s -S -w "%{http_code}" -o "${OUTPUT_FILE}" "${API_URL}" 2>>"${ERROR_FILE}")
+    # Attempt to fetch with retry logic
+    fetch_pokemon "${pokemon}"
+    RESULT=$?
     
-    # Check if curl command was successful
-    if [ $? -ne 0 ]; then
-        echo "  ✗ Failed to fetch ${pokemon} - Network error"
-        echo "Error: Failed to fetch ${pokemon} at $(date)" >> "${ERROR_FILE}"
-        rm -f "${OUTPUT_FILE}"
-        ((FAIL_COUNT++))
-        
-        # Add delay even after failure to avoid hammering the API
-        sleep ${DELAY}
-        continue
-    fi
-    
-    # Check HTTP status code
-    if [ "${HTTP_CODE}" -eq 200 ]; then
+    if [ ${RESULT} -eq 0 ]; then
         echo "  ✓ Successfully saved to ${OUTPUT_FILE}"
         ((SUCCESS_COUNT++))
+    elif [ ${RESULT} -eq 2 ]; then
+        echo "  ✗ Invalid Pokémon name: ${pokemon}"
+        echo "Error: Invalid Pokémon '${pokemon}' at $(date)" >> "${ERROR_FILE}"
+        ((FAIL_COUNT++))
     else
-        echo "  ✗ Failed with HTTP status code ${HTTP_CODE}"
-        echo "Error: ${pokemon} returned HTTP ${HTTP_CODE} at $(date)" >> "${ERROR_FILE}"
-        rm -f "${OUTPUT_FILE}"
+        echo "  ✗ Failed after ${MAX_RETRIES} attempts"
+        echo "Error: Failed to fetch '${pokemon}' after ${MAX_RETRIES} retries at $(date)" >> "${ERROR_FILE}"
         ((FAIL_COUNT++))
     fi
     
