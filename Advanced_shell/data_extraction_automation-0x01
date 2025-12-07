@@ -2,7 +2,7 @@
 
 # Data Extraction Script
 # Extracts name, height, weight, and type from Pokémon JSON data  
-# Uses grep, awk, and sed for text manipulation
+# Uses jq, awk, and sed for text manipulation
 
 JSON_FILE="data.json"
 
@@ -12,18 +12,20 @@ if [ ! -f "${JSON_FILE}" ]; then
     exit 1
 fi
 
-# Extract name - use sed to capitalize
-NAME=$(echo "pikachu" | sed 's/\b\(.\)/\u\1/g')
+# Extract data using jq, awk, and sed
+name=$(jq -r '.name' "${JSON_FILE}" | sed 's/\b\(.\)/\u\1/g')
 
-# Extract height (in decimeters, convert to meters)
-HEIGHT=$(grep -o '"height":[0-9]*' "${JSON_FILE}" | head -1 | sed 's/"height"://' | awk '{printf "%.1f", $1/10}')
+# Extract height (in decimeters, convert to meters using awk)
+height=$(jq -r '.height' "${JSON_FILE}")
+formatted_height=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
 
-# Extract weight (in hectograms, convert to kg)
-WEIGHT=$(grep -o '"weight":[0-9]*' "${JSON_FILE}" | head -1 | sed 's/"weight"://' | awk '{printf "%.0f", $1/10}')
+# Extract weight (in hectograms, convert to kg using awk)
+weight=$(jq -r '.weight' "${JSON_FILE}")
+formatted_weight=$(echo "${weight}" | awk '{printf "%.0f", $1/10}')
 
-# Extract type and capitalize first letter
-TYPE=$(grep -o '"type":{"name":"[^"]*"' "${JSON_FILE}" | head -1 | sed 's/.*"name":"//;s/"$//' | awk 'BEGIN{FS=""}{print toupper($1) substr($0,2)}')
+# Extract type and capitalize first letter using sed
+type=$(jq -r '.types[0].type.name' "${JSON_FILE}" | sed 's/\b\(.\)/\u\1/g')
 
 # Format and output result
-echo "${NAME} is of type ${TYPE}, weighs ${WEIGHT}kg, and is ${HEIGHT}m tall."
+echo "$name is of type $type, weighs ${formatted_weight}kg, and is ${formatted_height}m tall."
 
