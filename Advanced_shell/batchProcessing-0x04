@@ -3,6 +3,7 @@
 # Parallel Data Fetching Script - Task 4
 # Fetches Pokémon data in parallel using background processes
 # Properly handles process management and waits for completion
+# Uses jobs and kill for background process control
 
 # List of Pokémon to fetch
 POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
@@ -15,6 +16,44 @@ ERROR_FILE="parallel_errors.txt"
 
 # Success log file
 SUCCESS_FILE="parallel_success.txt"
+
+# Timeout for processes (in seconds)
+TIMEOUT=30
+
+# Cleanup function to kill all background jobs on exit
+cleanup() {
+    echo ""
+    echo "Cleaning up background processes..."
+    
+    # Get all background job PIDs
+    local job_pids=$(jobs -p)
+    
+    if [ -n "$job_pids" ]; then
+        echo "Killing remaining jobs..."
+        for pid in $job_pids; do
+            if kill -0 ${pid} 2>/dev/null; then
+                echo "  Terminating process ${pid}"
+                kill ${pid} 2>/dev/null
+            fi
+        done
+        
+        # Wait a moment for graceful termination
+        sleep 1
+        
+        # Force kill if still running
+        for pid in $job_pids; do
+            if kill -0 ${pid} 2>/dev/null; then
+                echo "  Force killing process ${pid}"
+                kill -9 ${pid} 2>/dev/null
+            fi
+        done
+    fi
+    
+    echo "Cleanup complete"
+}
+
+# Set up trap to cleanup on script exit or interrupt
+trap cleanup EXIT INT TERM
 
 # Clear log files
 > "${ERROR_FILE}"
@@ -66,18 +105,71 @@ echo ""
 echo "All fetch processes launched. Waiting for completion..."
 echo ""
 
-# Wait for all background processes to complete
-for pid in "${PIDS[@]}"; do
-    # Wait for specific process
-    wait ${pid}
-    EXIT_CODE=$?
-    
-    if [ ${EXIT_CODE} -eq 0 ]; then
-        echo "Process ${pid} completed successfully"
-    else
-        echo "Process ${pid} completed with errors (exit code: ${EXIT_CODE})"
+# Display running background jobs
+echo "Active background jobs:"
+jobs -l
+echo ""
+
+# Monitor jobs periodically
+echo "Monitoring background processes..."
+MONITOR_COUNT=0
+while [ $(jobs -p | wc -l) -gt 0 ] && [ ${MONITOR_COUNT} -lt ${TIMEOUT} ]; do
+    ACTIVE_JOBS=$(jobs -p | wc -l)
+    if [ ${ACTIVE_JOBS} -gt 0 ]; then
+        echo "  ${ACTIVE_JOBS} processes still running..."
+        sleep 1
+        ((MONITOR_COUNT++))
     fi
 done
+
+# Check for timeout
+if [ ${MONITOR_COUNT} -ge ${TIMEOUT} ]; then
+    echo ""
+    echo "WARNING: Timeout reached. Killing remaining processes..."
+    for pid in $(jobs -p); do
+        if kill -0 ${pid} 2>/dev/null; then
+            echo "  Killing process ${pid}"
+            kill ${pid} 2>/dev/null
+        fi
+    done
+fi
+
+echo ""
+echo "All fetch processes launched. Waiting for completion..."
+echo ""
+
+# Display running background jobs
+echo "Active background jobs:"
+jobs -l
+echo ""
+
+# Wait for all background processes to complete
+for pid in "${PIDS[@]}"; do
+    # Check if process is still running before waiting
+    if kill -0 ${pid} 2>/dev/null; then
+        echo "Waiting for process ${pid}..."
+        # Wait for specific process
+        wait ${pid}
+        EXIT_CODE=$?
+        
+        if [ ${EXIT_CODE} -eq 0 ]; then
+            echo "Process ${pid} completed successfully"
+        else
+            echo "Process ${pid} completed with errors (exit code: ${EXIT_CODE})"
+        fi
+    else
+        echo "Process ${pid} already completed"
+    fi
+done
+
+# Check for any remaining jobs
+REMAINING_JOBS=$(jobs -p)
+if [ -n "$REMAINING_JOBS" ]; then
+    echo ""
+    echo "Waiting for remaining background jobs..."
+    jobs -l
+    wait
+fi
 
 echo ""
 echo "All processes completed!"
