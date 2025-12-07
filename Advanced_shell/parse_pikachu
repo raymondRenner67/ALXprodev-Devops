@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Parse Pikachu - Data Extraction Script
+# Extracts name, height, weight, and type from Pokémon JSON data
+
+JSON_FILE="data.json"
+
+# Extract and format Pokémon data
+NAME=$(sed -n 's/.*"name":"pikachu".*/Pikachu/p' "${JSON_FILE}" | head -1)
+HEIGHT=$(sed -n 's/.*"height":\([0-9]*\).*/\1/p' "${JSON_FILE}" | awk '{printf "%.1f", $1/10}')
+WEIGHT=$(sed -n 's/.*"weight":\([0-9]*\).*/\1/p' "${JSON_FILE}" | awk '{printf "%.0f", $1/10}')
+TYPE=$(sed -n 's/.*"type":{"name":"\([^"]*\)".*/\1/p' "${JSON_FILE}" | head -1 | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+
+echo "${NAME} is of type ${TYPE}, weighs ${WEIGHT}kg, and is ${HEIGHT}m tall."
