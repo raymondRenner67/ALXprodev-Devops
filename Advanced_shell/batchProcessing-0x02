@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# Batch Processing Script - Task 2
+# Loops through a list of Pokémon and retrieves data from the API
+# Saves each Pokémon to a separate JSON file
+# Implements rate limiting with delays between requests
+
+# List of Pokémon to fetch
+POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+
+# API base URL
+API_BASE_URL="https://pokeapi.co/api/v2/pokemon"
+
+# Error log file
+ERROR_FILE="batch_errors.txt"
+
+# Delay between requests (in seconds) to handle rate limiting
+DELAY=1
+
+# Clear error log
+> "${ERROR_FILE}"
+
+echo "Starting batch processing of Pokémon data..."
+echo "Processing ${#POKEMON_LIST[@]} Pokémon..."
+echo ""
+
+# Counter for successful downloads
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+# Loop through each Pokémon in the list
+for pokemon in "${POKEMON_LIST[@]}"; do
+    OUTPUT_FILE="${pokemon}.json"
+    API_URL="${API_BASE_URL}/${pokemon}"
+    
+    echo "Fetching data for ${pokemon}..."
+    
+    # Make API request with error handling
+    # -s: silent mode
+    # -S: show errors even in silent mode
+    # -w "%{http_code}": write HTTP status code
+    # -o: output file
+    HTTP_CODE=$(curl -s -S -w "%{http_code}" -o "${OUTPUT_FILE}" "${API_URL}" 2>>"${ERROR_FILE}")
+    
+    # Check if curl command was successful
+    if [ $? -ne 0 ]; then
+        echo "  ✗ Failed to fetch ${pokemon} - Network error"
+        echo "Error: Failed to fetch ${pokemon} at $(date)" >> "${ERROR_FILE}"
+        rm -f "${OUTPUT_FILE}"
+        ((FAIL_COUNT++))
+        
+        # Add delay even after failure to avoid hammering the API
+        sleep ${DELAY}
+        continue
+    fi
+    
+    # Check HTTP status code
+    if [ "${HTTP_CODE}" -eq 200 ]; then
+        echo "  ✓ Successfully saved to ${OUTPUT_FILE}"
+        ((SUCCESS_COUNT++))
+    else
+        echo "  ✗ Failed with HTTP status code ${HTTP_CODE}"
+        echo "Error: ${pokemon} returned HTTP ${HTTP_CODE} at $(date)" >> "${ERROR_FILE}"
+        rm -f "${OUTPUT_FILE}"
+        ((FAIL_COUNT++))
+    fi
+    
+    # Add delay between requests to handle rate limiting
+    # This prevents overwhelming the API server
+    sleep ${DELAY}
+done
+
+echo ""
+echo "Batch processing complete!"
+echo "Successfully fetched: ${SUCCESS_COUNT} Pokémon"
+echo "Failed: ${FAIL_COUNT} Pokémon"
+
+# Show errors if any occurred
+if [ ${FAIL_COUNT} -gt 0 ]; then
+    echo ""
+    echo "Errors logged in ${ERROR_FILE}"
+fi
+
+exit 0
