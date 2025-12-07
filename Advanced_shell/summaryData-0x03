@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Pokémon Report Generator
+# Reads JSON files and generates a CSV report with summary statistics
+# Uses jq and awk for data processing
+
+OUTPUT_FILE="pokemon_report.csv"
+TEMP_FILE="temp_pokemon_data.txt"
+
+# Check if any JSON files exist
+JSON_FILES=$(ls *.json 2>/dev/null)
+if [ -z "$JSON_FILES" ]; then
+    echo "Error: No JSON files found in current directory"
+    exit 1
+fi
+
+# Create CSV header
+echo "Name,Height (m),Weight (kg)" > "${OUTPUT_FILE}"
+
+# Clear temp file
+> "${TEMP_FILE}"
+
+# Process each JSON file
+for json_file in *.json; do
+    # Extract name, height, and weight using jq
+    name=$(jq -r '.name' "${json_file}" 2>/dev/null | sed 's/\b\(.\)/\u\1/g')
+    height=$(jq -r '.height' "${json_file}" 2>/dev/null)
+    weight=$(jq -r '.weight' "${json_file}" 2>/dev/null)
+    
+    # Skip if extraction failed
+    if [ "$name" = "null" ] || [ -z "$name" ]; then
+        continue
+    fi
+    
+    # Convert height from decimeters to meters and weight from hectograms to kg
+    formatted_height=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
+    formatted_weight=$(echo "${weight}" | awk '{printf "%.1f", $1/10}')
+    
+    # Add to CSV
+    echo "${name},${formatted_height},${formatted_weight}" >> "${OUTPUT_FILE}"
+    
+    # Add to temp file for average calculation
+    echo "${formatted_height} ${formatted_weight}" >> "${TEMP_FILE}"
+done
+
+# Display the report
+echo "CSV Report generated at: ${OUTPUT_FILE}"
+echo ""
+cat "${OUTPUT_FILE}"
+echo ""
+
+# Calculate averages using awk
+if [ -s "${TEMP_FILE}" ]; then
+    awk '
+    {
+        height_sum += $1
+        weight_sum += $2
+        count++
+    }
+    END {
+        if (count > 0) {
+            avg_height = height_sum / count
+            avg_weight = weight_sum / count
+            printf "Average Height: %.2f m\n", avg_height
+            printf "Average Weight: %.2f kg\n", avg_weight
+        }
+    }
+    ' "${TEMP_FILE}"
+fi
+
+# Clean up temp file
+rm -f "${TEMP_FILE}"
